@@ -18,9 +18,9 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let video_files = [
         "media/snip_1.mp4",
-        "media/snip_1.mp4",
-        "media/snip_1.mp4",
-        "media/snip_1.mp4",
+        "media/snip_2.mp4",
+        "media/snip_3.mp4",
+        "media/snip_4.mp4",
     ];
 
     let mut decoders: Vec<DecoderContext> = Vec::new();
@@ -46,40 +46,69 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut final_frame = None;
     let mut frame_number = 1;
 
+    // loop {
+    //     let mut all_packets_empty = true;
+    //     let mut all_frames_processed = true;
+
+    //     for (i, decoder_ctx) in decoders.iter_mut().enumerate() {
+    //         while let Some((stream, packet)) = decoder_ctx.ictx.packets().next() {
+    //             all_packets_empty = false;
+    //             if stream.index() == decoder_ctx.video_stream_index {
+    //                 decoder_ctx.decoder.send_packet(&packet)?;
+    //                 loop {
+    //                     let mut decoded = Video::empty();
+    //                     match decoder_ctx.decoder.receive_frame(&mut decoded) {
+    //                         Ok(_) => {
+    //                             all_frames_processed = false;
+    //                             process_frame(&mut decoded, i, &mut final_frame, frame_number)?;
+    //                             frame_number += 1; // Increment frame_number for each frame processed
+    //                         }
+    //                      TODO try handling eagan
+    //                         Err(ref e)
+    //                             if e.to_string().contains("Resource temporarily unavailable")
+    //                                 || e.to_string().contains("35") =>
+    //                         {
+    //                             break; // Need more data, break and send next packet
+    //                         }
+    //                         Err(e) => {
+    //                             return Err(Box::new(e)); // Some other error occurred
+    //                         }
+    //                     }
+    //                 }
+    //             }
+    //         }
+    //     }
+
+    //     if all_packets_empty && all_frames_processed {
+    //         break;
+    //     }
+    // }
     loop {
         let mut all_packets_empty = true;
         let mut all_frames_processed = true;
 
         for (i, decoder_ctx) in decoders.iter_mut().enumerate() {
-            while let Some((stream, packet)) = decoder_ctx.ictx.packets().next() {
+            if let Some((stream, packet)) = decoder_ctx.ictx.packets().next() {
                 all_packets_empty = false;
                 if stream.index() == decoder_ctx.video_stream_index {
                     decoder_ctx.decoder.send_packet(&packet)?;
-                    loop {
-                        let mut decoded = Video::empty();
-                        match decoder_ctx.decoder.receive_frame(&mut decoded) {
-                            Ok(_) => {
-                                all_frames_processed = false;
-                                process_frame(&mut decoded, i, &mut final_frame, frame_number)?;
-                                frame_number += 1; // Increment frame_number for each frame processed
-                            }
-                            Err(ref e)
-                                if e.to_string().contains("Resource temporarily unavailable")
-                                    || e.to_string().contains("35") =>
-                            {
-                                break; // Need more data, break and send next packet
-                            }
-                            Err(e) => {
-                                return Err(Box::new(e)); // Some other error occurred
-                            }
-                        }
+                    let mut decoded = Video::empty();
+                    if decoder_ctx.decoder.receive_frame(&mut decoded).is_ok() {
+                        all_frames_processed = false;
+                        process_frame(&mut decoded, i, &mut final_frame, frame_number)?;
+                    } else if let Err(e) = decoder_ctx.decoder.receive_frame(&mut decoded) {
+                        println!("Error: {:?}", e);
                     }
                 }
             }
         }
 
         if all_packets_empty && all_frames_processed {
-            break; // Exit the loop if all packets are processed and all frames are processed
+            break;
+        }
+
+        if !all_frames_processed {
+            frame_number += 1;
         }
     }
 
