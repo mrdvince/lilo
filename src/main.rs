@@ -7,6 +7,12 @@ use ffmpeg::util::frame::video::Video;
 use image::{GenericImage, GenericImageView};
 use std::error::Error;
 
+struct DecoderContext {
+    ictx: ffmpeg::format::context::Input,
+    decoder: ffmpeg::decoder::Video,
+    video_stream_index: usize,
+}
+
 fn main() -> Result<(), Box<dyn Error>> {
     ffmpeg::init().unwrap();
 
@@ -16,10 +22,11 @@ fn main() -> Result<(), Box<dyn Error>> {
         "media/snip_1.mp4",
         "media/snip_1.mp4",
     ];
-    let mut final_frame = None;
-    let mut frame_number = 0;
-    for (i, file) in video_files.iter().enumerate() {
-        let mut ictx = input(&file)?;
+
+    let mut decoders: Vec<DecoderContext> = Vec::new();
+
+    for file in &video_files {
+        let ictx = input(&file)?;
         let input = ictx
             .streams()
             .best(Type::Video)
@@ -27,18 +34,42 @@ fn main() -> Result<(), Box<dyn Error>> {
         let context_decoder = ffmpeg::codec::context::Context::from_parameters(input.parameters())?;
 
         let video_stream_index = input.index();
-        let mut decoder = context_decoder.decoder().video()?;
-        let packets: Vec<_> = ictx.packets().collect();
+        let decoder = context_decoder.decoder().video()?;
 
-        for (stream, packet) in packets {
-            if stream.index() == video_stream_index {
-                decoder.send_packet(&packet)?;
-                let mut decoded = Video::empty();
-                while decoder.receive_frame(&mut decoded).is_ok() {
-                    process_frame(&mut decoded, i, &mut final_frame, frame_number)?;
-                    frame_number += 1;
+        decoders.push(DecoderContext {
+            ictx,
+            decoder,
+            video_stream_index,
+        });
+    }
+
+    let mut final_frame = None;
+    let mut frame_number = 1;
+
+    loop {
+        let mut all_packets_empty = true;
+        let mut all_frames_processed = true;
+
+        for (i, decoder_ctx) in decoders.iter_mut().enumerate() {
+            if let Some((stream, packet)) = decoder_ctx.ictx.packets().next() {
+                all_packets_empty = false;
+                if stream.index() == decoder_ctx.video_stream_index {
+                    decoder_ctx.decoder.send_packet(&packet)?;
+                    let mut decoded = Video::empty();
+                    if decoder_ctx.decoder.receive_frame(&mut decoded).is_ok() {
+                        all_frames_processed = false;
+                        process_frame(&mut decoded, i, &mut final_frame, frame_number)?;
+                    }
                 }
             }
+        }
+
+        if all_packets_empty && all_frames_processed {
+            break; // Exit the loop if all packets are processed and all frames are processed
+        }
+
+        if !all_frames_processed {
+            frame_number += 1; // Increment frame_number only if at least one frame was processed
         }
     }
 
@@ -63,13 +94,6 @@ fn process_frame(
 
     let mut rgb_frame = Video::empty();
     scaler.run(frame, &mut rgb_frame)?;
-    // println!(
-    //     "Frame dimensions: {}x{}",
-    //     rgb_frame.width(),
-    //     rgb_frame.height()
-    // );
-    // println!("rgb_frame format: {:?}", rgb_frame.format());
-    // println!("Data length: {}", rgb_frame.data(0).len());
 
     let img = match image::ImageBuffer::<image::Rgb<u8>, Vec<u8>>::from_raw(
         rgb_frame.width(),
@@ -84,6 +108,12 @@ fn process_frame(
             )))
         }
     };
+
+    // Save the entire frame to disk
+    img.save(format!(
+        "media/individual_frames/full_frame_{}_{}.png",
+        index, frame_number
+    ))?;
 
     let (width, height) = img.dimensions();
     let quarter_width = width / 2;
@@ -105,6 +135,13 @@ fn process_frame(
             .view(quarter_width, quarter_height, quarter_width, quarter_height)
             .to_image(),
     };
+
+    // Save the quarter frame to disk
+    quarter.save(format!(
+        "media/individual_frames/quarter_frame_{}_{}.png",
+        index, frame_number
+    ))?;
+
     if let Some(ref mut final_img) = final_frame {
         final_img.copy_from(
             &quarter,
