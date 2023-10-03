@@ -51,14 +51,28 @@ fn main() -> Result<(), Box<dyn Error>> {
         let mut all_frames_processed = true;
 
         for (i, decoder_ctx) in decoders.iter_mut().enumerate() {
-            if let Some((stream, packet)) = decoder_ctx.ictx.packets().next() {
+            while let Some((stream, packet)) = decoder_ctx.ictx.packets().next() {
                 all_packets_empty = false;
                 if stream.index() == decoder_ctx.video_stream_index {
                     decoder_ctx.decoder.send_packet(&packet)?;
-                    let mut decoded = Video::empty();
-                    if decoder_ctx.decoder.receive_frame(&mut decoded).is_ok() {
-                        all_frames_processed = false;
-                        process_frame(&mut decoded, i, &mut final_frame, frame_number)?;
+                    loop {
+                        let mut decoded = Video::empty();
+                        match decoder_ctx.decoder.receive_frame(&mut decoded) {
+                            Ok(_) => {
+                                all_frames_processed = false;
+                                process_frame(&mut decoded, i, &mut final_frame, frame_number)?;
+                                frame_number += 1; // Increment frame_number for each frame processed
+                            }
+                            Err(ref e)
+                                if e.to_string().contains("Resource temporarily unavailable")
+                                    || e.to_string().contains("35") =>
+                            {
+                                break; // Need more data, break and send next packet
+                            }
+                            Err(e) => {
+                                return Err(Box::new(e)); // Some other error occurred
+                            }
+                        }
                     }
                 }
             }
@@ -66,10 +80,6 @@ fn main() -> Result<(), Box<dyn Error>> {
 
         if all_packets_empty && all_frames_processed {
             break; // Exit the loop if all packets are processed and all frames are processed
-        }
-
-        if !all_frames_processed {
-            frame_number += 1; // Increment frame_number only if at least one frame was processed
         }
     }
 
