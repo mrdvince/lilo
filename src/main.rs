@@ -12,12 +12,12 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let video_files = [
         "media/snip_1.mp4",
-        "media/snip_2.mp4",
-        "media/snip_3.mp4",
-        "media/snip_4.mp4",
+        "media/snip_1.mp4",
+        "media/snip_1.mp4",
+        "media/snip_1.mp4",
     ];
     let mut final_frame = None;
-
+    let mut frame_number = 0;
     for (i, file) in video_files.iter().enumerate() {
         let mut ictx = input(&file)?;
         let input = ictx
@@ -35,15 +35,13 @@ fn main() -> Result<(), Box<dyn Error>> {
                 decoder.send_packet(&packet)?;
                 let mut decoded = Video::empty();
                 while decoder.receive_frame(&mut decoded).is_ok() {
-                    process_frame(&mut decoded, i, &mut final_frame)?;
-                    break;
+                    process_frame(&mut decoded, i, &mut final_frame, frame_number)?;
+                    frame_number += 1;
                 }
             }
         }
     }
-    if let Some(frame) = final_frame {
-        frame.save("final_frame.png")?;
-    }
+
     Ok(())
 }
 
@@ -51,6 +49,7 @@ fn process_frame(
     frame: &mut Video,
     index: usize,
     final_frame: &mut Option<image::ImageBuffer<image::Rgb<u8>, Vec<u8>>>,
+    frame_number: usize,
 ) -> Result<(), Box<dyn Error>> {
     let mut scaler = Context::get(
         frame.format(),
@@ -64,13 +63,13 @@ fn process_frame(
 
     let mut rgb_frame = Video::empty();
     scaler.run(frame, &mut rgb_frame)?;
-    println!(
-        "Frame dimensions: {}x{}",
-        rgb_frame.width(),
-        rgb_frame.height()
-    );
-    println!("rgb_frame format: {:?}", rgb_frame.format());
-    println!("Data length: {}", rgb_frame.data(0).len());
+    // println!(
+    //     "Frame dimensions: {}x{}",
+    //     rgb_frame.width(),
+    //     rgb_frame.height()
+    // );
+    // println!("rgb_frame format: {:?}", rgb_frame.format());
+    // println!("Data length: {}", rgb_frame.data(0).len());
 
     let img = match image::ImageBuffer::<image::Rgb<u8>, Vec<u8>>::from_raw(
         rgb_frame.width(),
@@ -113,5 +112,10 @@ fn process_frame(
             (index as u32 / 2) * quarter_height,
         )?;
     }
+    final_frame
+        .clone()
+        .unwrap()
+        .save(format!("media/pngs/frame{}.png", frame_number))?;
+
     Ok(())
 }
